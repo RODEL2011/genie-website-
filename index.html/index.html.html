@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genie Text Bot</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="w-full max-w-lg bg-white rounded-xl shadow-lg flex flex-col h-[90vh] relative app-container">
+        <div class="header">
+            <h1 class="text-2xl font-bold flex-grow">Genie Text Bot</h1>
+            <div class="flex items-center space-x-3">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.527.314 1.203.55 1.956.697l-.14-.725H12z" />
+                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+                </svg>
+            </div>
+        </div>
+
+        <div id="chatHistory" class="chat-container flex flex-col p-4 flex-grow bg-gray-100">
+            <div class="message bot-message self-start">
+                <span class="message-content">Hello! How can I help you today? From Rodel.</span>
+                <svg class="speaker-icon h-5 w-5 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" onclick="speakMessage(this.previousElementSibling.textContent)">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1V9a1 1 0 011-1h1.586l4.707-4.707C10.923 3.552 11.403 3 12 3v18c-.597 0-1.077-.552-1.414-.894L5.586 15z" />
+                </svg>
+            </div>
+            <div id="loadingIndicator" class="loading-indicator">
+                <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Typing...
+            </div>
+            <div id="recordingIndicator" class="recording-indicator">
+                <span class="mr-2">Recording...</span>
+                <div class="h-2 w-2 bg-red-600 rounded-full pulse-animation"></div>
+            </div>
+        </div>
+
+        <div class="p-4 border-t border-gray-200 flex items-end space-x-2 rounded-b-xl bg-white relative">
+            <div id="unifiedInputContainer" class="unified-input-container">
+                <input type="text" id="messageInput" placeholder="Ask Gemini"
+                        class="flex-grow focus:outline-none bg-transparent">
+                <div id="filePreviewContainer" class="file-preview-wrapper hidden">
+                    <span class="file-name"></span>
+                    <span class="file-type"></span>
+                </div>
+            </div>
+            
+            <input type="file" id="fileUpload" accept="image/*, .txt" style="display:none;">
+            
+            <button id="kebabMenuButton"
+                    class="input-button bg-red-600 text-white p-3 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500">
+                <svg xmlns="http://www.w3.org="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                </svg>
+            </button>
+
+            <button id="sendButton"
+                    class="input-button bg-red-600 text-white p-3 rounded-md hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                </svg>
+            </button>
+
+            <div id="optionsMenu" class="options-menu">
+                <button id="popupFileUploadButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Upload File (.txt, image)
+                </button>
+                <button id="popupDownloadChatButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                    </svg>
+                    Download Chat Summary
+                </button>
+                <button id="popupMicButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-14 0v-1A7 7 0 0119 10v1z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18v3m-3-3h6" />
+                    </svg>
+                    Use Microphone
+                </button>
+                <button id="popupGenerateImageButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
+                    Generate Image
+                </button>
+                <button id="popupGenerateMusicButton">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c-3.111 0-5 .5-5 4s1.889 4 5 4 5-.5 5-4V6M12 3c-1.789 0-3 .5-3 4s1.211 4 3 4 3-.5 3-4V3M12 3l12-3" />
+                    </svg>
+                    Generate Music
+                </button>
+            </div>
+        </div>
+        <div class="absolute bottom-4 right-4 text-xs text-gray-400">
+            ai
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

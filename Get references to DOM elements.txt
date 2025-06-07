@@ -1,0 +1,614 @@
+// Get references to DOM elements
+const chatHistory = document.getElementById('chatHistory');
+const messageInput = document.getElementById('messageInput');
+const sendButton = document.getElementById('sendButton');
+const kebabMenuButton = document.getElementById('kebabMenuButton'); 
+const optionsMenu = document.getElementById('optionsMenu'); 
+const popupFileUploadButton = document.getElementById('popupFileUploadButton'); 
+const popupDownloadChatButton = document.getElementById('popupDownloadChatButton'); 
+const popupMicButton = document.getElementById('popupMicButton'); 
+const popupGenerateImageButton = document.getElementById('popupGenerateImageButton');
+const popupGenerateMusicButton = document.getElementById('popupGenerateMusicButton'); // New button
+
+const fileUploadInput = document.getElementById('fileUpload'); 
+const loadingIndicator = document.getElementById('loadingIndicator');
+const recordingIndicator = document.getElementById('recordingIndicator');
+
+// File preview elements
+const unifiedInputContainer = document.getElementById('unifiedInputContainer'); 
+const filePreviewContainer = document.getElementById('filePreviewContainer');
+
+// !! IMPORTANT SECURITY NOTE:
+// For production applications, DO NOT hardcode API keys directly in client-side JavaScript.
+// This key will be visible to anyone inspecting your website's source code.
+// Instead, use a backend server to make API calls, and securely store your API keys on the server.
+// The frontend would then communicate with your backend server.
+
+// Your API key - hardcoded to the Google API key for text generation
+const GEMINI_API_KEY = "AIzaSyD4OvfIxoGWBP4Te_r10CuffoT1PrDZ6g4"; // Replaced with the provided API key
+const IMAGEN_API_KEY = "YOUR_IMAGEN_API_KEY_HERE"; // Replace with your actual Imagen API key, or leave empty if backend handles
+const SUNO_API_KEY = "YOUR_SUNO_API_KEY_HERE"; // Replace with your actual Suno API key, or leave empty if backend handles.
+
+// Base URL for the Gemini API
+const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`;
+const IMAGEN_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${IMAGEN_API_KEY}`;
+// Placeholder for Suno AI API URL - in a real app, this would be a secure backend endpoint
+const SUNO_SIMULATED_AUDIO_URL = "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3"; 
+
+
+let chatHistoryArray = []; 
+let currentUtterance = null; 
+let selectedFileForUpload = null; // Stores the file data and type for sending
+let isImageGenerationMode = false; // Flag to indicate if next message is for image generation
+let isMusicGenerationMode = false; // New flag for music generation mode
+
+// Define a maximum token limit for bot responses (approx. 100 words = 150 tokens)
+const MAX_OUTPUT_TOKENS = 150; 
+ 
+// Define keywords that suggest a user is asking about an incomplete response
+const FOLLOW_UP_KEYWORDS = ["finish", "continue", "more", "longer", "short", "why", "didn't", "stop"];
+
+// Speech Recognition setup
+const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = false; 
+    recognition.lang = 'en-US';
+    recognition.interimResults = false; 
+    recognition.maxAlternatives = 1; 
+
+    // Event for when speech is recognized
+    recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        messageInput.value = transcript; 
+        sendMessage(transcript); 
+        recordingIndicator.style.display = 'none'; 
+        optionsMenu.classList.remove('show'); // Hide pop-up after mic use
+    };
+
+    // Event for when recognition ends
+    recognition.onend = () => {
+        recordingIndicator.style.display = 'none'; 
+        messageInput.placeholder = "Ask Gemini"; 
+    };
+
+    // Event for errors
+    recognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        recordingIndicator.style.display = 'none'; 
+        messageInput.placeholder = "Ask Gemini"; 
+        let errorMessage = `Voice input error: ${event.error}. `;
+        if (event.error === 'not-allowed') {
+            errorMessage += "This often means microphone access is denied by your browser. Please check your browser's site settings and ensure microphone access is allowed for this page. You might need to manually enable it in your browser settings.";
+        } else if (event.error === 'not-supported') {
+            errorMessage += "Your browser does not support Speech Recognition. Please try a different browser like Chrome or Edge.";
+        } else {
+            errorMessage += "Please try again.";
+        }
+        addMessage(errorMessage, 'bot'); 
+        optionsMenu.classList.remove('show'); // Hide pop-up on error
+    };
+} else {
+    console.warn('Speech Recognition not supported in this browser.');
+    if (popupMicButton) popupMicButton.style.display = 'none';
+}
+
+// Speech Synthesis setup
+const synthesis = window.speechSynthesis;
+
+/**
+ * Adds a message to the chat history display.
+ * @param {string} text - The main message text.
+ * @param {string} sender - 'user' or 'bot'.
+ * @param {string} [mediaDisplayContent] - URL for image or truncated text content for text file.
+ * @param {boolean} [isImage] - True if mediaDisplayContent is an image URL (for uploaded images).
+ * @param {boolean} [isGeneratedImage] - True if this message is a generated image.
+ * @param {boolean} [isGeneratedAudio] - True if this message is a generated audio.
+ */
+function addMessage(text, sender, mediaDisplayContent = null, isImage = false, isGeneratedImage = false, isGeneratedAudio = false) {
+    const messageDiv = document.createElement('div');
+    messageDiv.classList.add('message');
+    
+    const messageContentWrapper = document.createElement('div');
+    messageContentWrapper.classList.add('message-content', 'flex-grow');
+
+    if (isGeneratedImage && mediaDisplayContent) {
+        // For generated images, show image directly and then text/download button
+        const img = document.createElement('img');
+        img.src = mediaDisplayContent;
+        img.classList.add('generated-image'); // Use specific class for generated images
+        img.alt = "Generated Image";
+        messageContentWrapper.appendChild(img);
+
+        // Add download button for generated image
+        const downloadBtn = document.createElement('button');
+        downloadBtn.textContent = 'Download Image';
+        downloadBtn.classList.add('download-button');
+        downloadBtn.onclick = () => downloadMedia(mediaDisplayContent, 'generated_image.png');
+        messageContentWrapper.appendChild(downloadBtn);
+
+        if (text) { // If there's accompanying text for the generated image
+            const textSpan = document.createElement('span');
+            textSpan.textContent = text;
+            messageContentWrapper.appendChild(textSpan);
+        }
+    } else if (isGeneratedAudio && mediaDisplayContent) {
+        // For generated audio, show audio player and then text/download button
+        const audio = document.createElement('audio');
+        audio.src = mediaDisplayContent;
+        audio.controls = true; // Show default controls
+        audio.classList.add('generated-audio'); 
+        messageContentWrapper.appendChild(audio);
+
+        const downloadBtn = document.createElement('button');
+        downloadBtn.textContent = 'Download Music';
+        downloadBtn.classList.add('download-button');
+        downloadBtn.onclick = () => downloadMedia(mediaDisplayContent, 'generated_music.mp3');
+        messageContentWrapper.appendChild(downloadBtn);
+
+        if (text) { // If there's accompanying text (e.g., lyrics)
+            const textSpan = document.createElement('span');
+            textSpan.textContent = text;
+            messageContentWrapper.appendChild(textSpan);
+        }
+    }
+    // Add media content (image or text file preview for uploaded files)
+    else if (isImage && mediaDisplayContent) {
+        const img = document.createElement('img');
+        img.src = mediaDisplayContent;
+        img.classList.add('chat-image');
+        img.alt = "Uploaded content";
+        messageContentWrapper.appendChild(img);
+        const textSpan = document.createElement('span');
+        textSpan.textContent = text;
+        messageContentWrapper.appendChild(textSpan);
+    } else if (mediaDisplayContent && !isImage) { // For text file content preview
+        const pre = document.createElement('pre'); 
+        pre.textContent = mediaDisplayContent; 
+        pre.classList.add('chat-text-file-content'); 
+        messageContentWrapper.appendChild(pre);
+        const textSpan = document.createElement('span');
+        textSpan.textContent = text;
+        messageContentWrapper.appendChild(textSpan);
+    } else {
+        // Regular text message
+        const textSpan = document.createElement('span');
+        textSpan.textContent = text;
+        messageContentWrapper.appendChild(textSpan);
+    }
+
+
+    messageDiv.appendChild(messageContentWrapper);
+
+    if (sender === 'user') {
+        messageDiv.classList.add('user-message', 'self-end');
+    } else {
+        messageDiv.classList.add('bot-message', 'self-start');
+        messageDiv.style.flexDirection = 'row'; 
+
+        // Add speaker icon for bot messages, only if it's a text message or a generated image with text
+        if (!isGeneratedImage && !isGeneratedAudio || (isGeneratedAudio && text)) { // Only if there's text to speak
+            const speakerIcon = document.createElement('svg');
+            speakerIcon.classList.add('speaker-icon', 'h-5', 'w-5', 'text-gray-500');
+            speakerIcon.setAttribute('fill', 'none');
+            speakerIcon.setAttribute('viewBox', '0 0 24 24');
+            speakerIcon.setAttribute('stroke', 'currentColor');
+            speakerIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1V9a1 1 0 011-1h1.586l4.707-4.707C10.923 3.552 11.403 3 12 3v18c-.597 0-1.077-.552-1.414-.894L5.586 15z" />';
+            speakerIcon.onclick = () => speakMessage(text);
+            messageDiv.appendChild(speakerIcon);
+        }
+    }
+    chatHistory.appendChild(messageDiv);
+    chatHistory.scrollTop = chatHistory.scrollHeight; // Scroll to the bottom
+    chatHistoryArray.push({ role: sender === 'user' ? 'user' : 'model', parts: [{ text: text }] });
+}
+
+
+/**
+ * Sends a message to the Gemini API and displays the response.
+ * @param {string} message - The user's message.
+ */
+async function sendMessage(message) {
+    if (!message.trim() && !selectedFileForUpload) {
+        return; // Don't send empty messages without a file
+    }
+
+    addMessage(message, 'user', selectedFileForUpload ? selectedFileForUpload.dataURL : null, selectedFileForUpload ? selectedFileForUpload.type.startsWith('image/') : false);
+
+    loadingIndicator.style.display = 'flex'; // Show loading indicator
+    messageInput.value = ''; // Clear input field
+    unifiedInputContainer.classList.remove('has-file'); // Remove file indicator class
+    filePreviewContainer.classList.add('hidden'); // Hide file preview
+    selectedFileForUpload = null; // Clear selected file
+
+    let apiUrl = GEMINI_API_URL;
+    let requestBody;
+    let processResponseFunction = processGeminiResponse;
+
+    if (isImageGenerationMode) {
+        // Image generation prompt
+        apiUrl = IMAGEN_API_URL;
+        requestBody = {
+            "instances": [{ "prompt": message }],
+            "parameters": {
+                "sampleCount": 1,
+                "aspectRatio": "1:1"
+            }
+        };
+        processResponseFunction = processImageGenerationResponse;
+        isImageGenerationMode = false; // Reset the flag
+    } else if (isMusicGenerationMode) {
+        // Music generation prompt (simulated)
+        apiUrl = SUNO_SIMULATED_AUDIO_URL; // This is a placeholder for a real API endpoint
+        requestBody = {
+            "prompt": message,
+            "duration": 30 // Example: request 30 seconds of music
+        };
+        processResponseFunction = processMusicGenerationResponse;
+        isMusicGenerationMode = false; // Reset the flag
+    }
+    else {
+        // Regular text generation or multimodal input
+        const contents = [];
+        if (selectedFileForUpload) {
+            if (selectedFileForUpload.type.startsWith('image/')) {
+                contents.push({
+                    "text": message,
+                    "inlineData": {
+                        "mimeType": selectedFileForUpload.type,
+                        "data": selectedFileForUpload.dataURL.split(',')[1] // Base64 encoded data
+                    }
+                });
+            } else if (selectedFileForUpload.type === 'text/plain') {
+                contents.push({
+                    "text": `Analyze the following text file content: ${selectedFileForUpload.content}\n\nUser query: ${message}`
+                });
+            }
+        } else {
+            contents.push({ "text": message });
+        }
+
+        requestBody = {
+            "contents": [{ "role": "user", "parts": contents }],
+            "generationConfig": {
+                "maxOutputTokens": MAX_OUTPUT_TOKENS,
+                "temperature": 0.7,
+                "topP": 0.9,
+                "topK": 40
+            }
+        };
+    }
+
+    try {
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`API error: ${response.status} - ${errorData.error ? errorData.error.message : response.statusText}`);
+        }
+
+        const data = await response.json();
+        processResponseFunction(data, message);
+
+    } catch (error) {
+        console.error('Error sending message:', error);
+        addMessage(`I apologize, but there was an error processing your request: ${error.message}. Please try again.`, 'bot');
+    } finally {
+        loadingIndicator.style.display = 'none'; // Hide loading indicator
+    }
+}
+
+/**
+ * Processes the response from the Gemini API for text generation.
+ * @param {object} data - The API response data.
+ * @param {string} userMessage - The original user message.
+ */
+function processGeminiResponse(data, userMessage) {
+    let botResponseText = '';
+    if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts.length > 0) {
+        botResponseText = data.candidates[0].content.parts[0].text;
+
+        // Check if the response was truncated or seems incomplete based on user query
+        const isTruncated = botResponseText.length > (MAX_OUTPUT_TOKENS * 0.7) && !botResponseText.endsWith('.') && !botResponseText.endsWith('!') && !botResponseText.endsWith('?');
+        const askedForMore = FOLLOW_UP_KEYWORDS.some(keyword => userMessage.toLowerCase().includes(keyword));
+
+        // If the bot response seems incomplete AND the user didn't explicitly ask for more,
+        // or if the response is shorter than expected and not clearly concluded,
+        // append a suggestion to ask for more.
+        if ((isTruncated && !askedForMore) || (botResponseText.length < (MAX_OUTPUT_TOKENS * 0.5) && !botResponseText.endsWith('.') && !botResponseText.endsWith('!') && !botResponseText.endsWith('?'))) {
+             // Add a prompt to ask for more if the response is not a complete sentence
+            if (!botResponseText.endsWith('.') && !botResponseText.endsWith('!') && !botResponseText.endsWith('?') && !botResponseText.endsWith(':')) {
+                botResponseText += "..."; // Indicate continuation
+            }
+            botResponseText += " Would you like me to elaborate or continue?";
+        }
+    } else {
+        botResponseText = "I'm sorry, I couldn't generate a response. Please try asking in a different way.";
+        console.warn("Unexpected Gemini API response structure:", data);
+    }
+    addMessage(botResponseText, 'bot');
+}
+
+/**
+ * Processes the response from the Imagen API for image generation.
+ * @param {object} data - The API response data.
+ */
+function processImageGenerationResponse(data) {
+    if (data.predictions && data.predictions.length > 0 && data.predictions[0].bytesBase64Encoded) {
+        const base64Image = data.predictions[0].bytesBase64Encoded;
+        const imageUrl = `data:image/png;base64,${base64Image}`;
+        addMessage("Here is your generated image:", 'bot', imageUrl, false, true);
+    } else {
+        addMessage("I'm sorry, I couldn't generate an image based on your request. Please try a different prompt.", 'bot');
+        console.warn("Unexpected Imagen API response structure:", data);
+    }
+}
+
+/**
+ * Processes the response for simulated music generation.
+ * In a real scenario, this would handle a response from Suno or a similar music generation API.
+ * @param {object} data - The simulated API response data (or actual if integrated).
+ */
+function processMusicGenerationResponse(data) {
+    // For now, we're using a simulated audio URL.
+    // In a real application, 'data.audioUrl' would come from the Suno API response.
+    const audioUrl = SUNO_SIMULATED_AUDIO_URL;
+    addMessage("Here is your generated music:", 'bot', audioUrl, false, false, true);
+}
+
+
+/**
+ * Initiates speech synthesis for a given message.
+ * @param {string} message - The text to speak.
+ */
+function speakMessage(message) {
+    if (!synthesis) {
+        console.warn('Speech synthesis not supported in this browser.');
+        addMessage("I'm sorry, voice output is not supported in your browser.", 'bot');
+        return;
+    }
+
+    if (currentUtterance && synthesis.speaking) {
+        synthesis.cancel(); // Stop current speech if any
+    }
+
+    currentUtterance = new SpeechSynthesisUtterance(message);
+    currentUtterance.lang = 'en-US'; // Set language
+
+    // Optional: Choose a specific voice
+    // const voices = synthesis.getVoices();
+    // const selectedVoice = voices.find(voice => voice.name === 'Google US English'); // Example
+    // if (selectedVoice) {
+    //     currentUtterance.voice = selectedVoice;
+    // }
+
+    currentUtterance.onerror = (event) => {
+        console.error('Speech synthesis error:', event.error);
+        // addMessage("I encountered an error trying to speak. Your browser might have issues with speech synthesis or lack suitable voices.", 'bot');
+    };
+
+    synthesis.speak(currentUtterance);
+}
+
+/**
+ * Handles the download of generated media (images, audio).
+ * @param {string} dataUrl - The URL or Data URL of the media.
+ * @param {string} filename - The desired filename for the downloaded file.
+ */
+function downloadMedia(dataUrl, filename) {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+
+// Event Listeners
+sendButton.addEventListener('click', () => {
+    sendMessage(messageInput.value);
+});
+
+messageInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendMessage(messageInput.value);
+    }
+});
+
+// Kebab menu button click handler
+kebabMenuButton.addEventListener('click', () => {
+    optionsMenu.classList.toggle('show');
+});
+
+// Close options menu if clicked outside
+document.addEventListener('click', (event) => {
+    if (!kebabMenuButton.contains(event.target) && !optionsMenu.contains(event.target)) {
+        optionsMenu.classList.remove('show');
+    }
+});
+
+
+// Pop-up menu button handlers
+popupFileUploadButton.addEventListener('click', () => {
+    fileUploadInput.click(); // Trigger the hidden file input
+    optionsMenu.classList.remove('show'); // Hide pop-up
+});
+
+popupDownloadChatButton.addEventListener('click', () => {
+    downloadChatSummary();
+    optionsMenu.classList.remove('show'); // Hide pop-up
+});
+
+popupMicButton.addEventListener('click', () => {
+    if (recognition) {
+        try {
+            recognition.start();
+            recordingIndicator.style.display = 'flex'; // Show recording indicator
+            messageInput.placeholder = "Listening...";
+        } catch (error) {
+            console.error('Speech recognition start error:', error);
+            if (error.name === 'AbortError') {
+                addMessage("Voice input was already active. Please wait or try again.", 'bot');
+            } else {
+                addMessage(`Failed to start voice input: ${error.message}. Please check microphone permissions.`, 'bot');
+            }
+            recordingIndicator.style.display = 'none'; // Hide if failed
+        }
+    } else {
+        addMessage("Speech Recognition is not supported by your browser.", 'bot');
+    }
+    optionsMenu.classList.remove('show'); // Hide pop-up
+});
+
+popupGenerateImageButton.addEventListener('click', () => {
+    isImageGenerationMode = true;
+    optionsMenu.classList.remove('show');
+    messageInput.placeholder = "Enter prompt for image generation...";
+    messageInput.focus();
+    addMessage("Image generation mode activated. Please enter a prompt for the image you want to create.", "bot");
+});
+
+popupGenerateMusicButton.addEventListener('click', () => {
+    isMusicGenerationMode = true;
+    optionsMenu.classList.remove('show');
+    messageInput.placeholder = "Enter prompt for music generation...";
+    messageInput.focus();
+    addMessage("Music generation mode activated. Please enter a prompt describing the music you want to create.", "bot");
+});
+
+
+// File upload change handler
+fileUploadInput.addEventListener('change', (event) => {
+    const file = event.target.files[0];
+    if (file) {
+        if (file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                selectedFileForUpload = {
+                    file: file,
+                    type: file.type,
+                    dataURL: e.target.result // Base64 for image
+                };
+                displayFilePreview(file.name, 'Image');
+            };
+            reader.readAsDataURL(file);
+        } else if (file.type === 'text/plain') {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                selectedFileForUpload = {
+                    file: file,
+                    type: file.type,
+                    content: e.target.result // Text content for text file
+                };
+                displayFilePreview(file.name, 'Text Document');
+            };
+            reader.readAsText(file);
+        } else {
+            alert('Unsupported file type. Please upload an image or a .txt file.');
+            fileUploadInput.value = ''; // Clear selected file
+        }
+    }
+});
+
+
+/**
+ * Displays the selected file's name in the input area.
+ * @param {string} fileName - The name of the file.
+ * @param {string} fileTypeDisplay - A user-friendly string for the file type (e.g., 'Image', 'Text Document').
+ */
+function displayFilePreview(fileName, fileTypeDisplay) {
+    const fileNameSpan = filePreviewContainer.querySelector('.file-name');
+    const fileTypeSpan = filePreviewContainer.querySelector('.file-type');
+    
+    fileNameSpan.textContent = fileName;
+    fileTypeSpan.textContent = `(${fileTypeDisplay})`;
+
+    // Add a simple SVG icon for the file type
+    let fileIconSvg = '';
+    if (fileTypeDisplay === 'Image') {
+        fileIconSvg = `<svg class="file-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+        </svg>`;
+    } else if (fileTypeDisplay === 'Text Document') {
+        fileIconSvg = `<svg class="file-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+        </svg>`;
+    }
+    // Insert icon before file name
+    fileNameSpan.insertAdjacentHTML('beforebegin', fileIconSvg);
+
+    unifiedInputContainer.classList.add('has-file');
+    filePreviewContainer.classList.remove('hidden'); // Ensure it's not hidden by the utility class
+    filePreviewContainer.classList.add('show-preview'); // Trigger animation
+    messageInput.placeholder = "Enter message or click X to remove file...";
+}
+
+// Handle removing file preview by clicking the preview bubble
+filePreviewContainer.addEventListener('click', () => {
+    removeFilePreview();
+});
+
+function removeFilePreview() {
+    selectedFileForUpload = null;
+    fileUploadInput.value = ''; // Clear the file input element
+    filePreviewContainer.classList.remove('show-preview');
+    filePreviewContainer.classList.add('hidden'); // Hide it
+    unifiedInputContainer.classList.remove('has-file'); // Remove the class that expands the input
+    messageInput.placeholder = "Ask Gemini"; // Reset placeholder
+    // Remove the dynamically added icon
+    const existingIcon = filePreviewContainer.querySelector('.file-icon');
+    if (existingIcon) {
+        existingIcon.remove();
+    }
+}
+
+/**
+ * Downloads the chat history as a text file.
+ */
+function downloadChatSummary() {
+    let summaryText = "Chat Summary:\n\n";
+    chatHistoryArray.forEach(msg => {
+        const role = msg.role === 'user' ? 'You' : 'Genie';
+        summaryText += `${role}: ${msg.parts[0].text}\n\n`; // Assuming parts[0] is always text
+    });
+
+    const blob = new Blob([summaryText], { type: 'text/plain;charset=utf-8' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'chat_summary.txt';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href); // Clean up the object URL
+}
+
+
+// Drag and Drop functionality for chat container
+chatHistory.addEventListener('dragover', (event) => {
+    event.preventDefault(); // Prevent default to allow drop
+    chatHistory.classList.add('drag-over');
+});
+
+chatHistory.addEventListener('dragleave', () => {
+    chatHistory.classList.remove('drag-over');
+});
+
+chatHistory.addEventListener('drop', (event) => {
+    event.preventDefault();
+    chatHistory.classList.remove('drag-over');
+
+    const files = event.dataTransfer.files;
+    if (files.length > 0) {
+        const file = files[0]; // Take only the first file
+        fileUploadInput.files = files; // Assign dropped files to the hidden input
+        fileUploadInput.dispatchEvent(new Event('change')); // Trigger change event
+    }
+});
